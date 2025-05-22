@@ -14,7 +14,7 @@ from langchain_docling import DoclingLoader
 from kiwipiepy import Kiwi # Kiwi import 확인
 from langchain_core.documents import Document # LangChain Document 임포트
 from app.config.opensearch_config import INDEX_MAP # MASTER_INDEX는 settings에서 가져옴
-from app.models.document_model import UploadResponse
+from app.models.document_model import UploadResponse, MultiUploadResponse, FileUploadResult
 from app.models import vector_store as vector_store_module # VectorStore 클래스 대신 vector_store 모듈을 임포트
 from app.config.settings import get_settings
 
@@ -24,6 +24,46 @@ vector_store = vector_store_module # DocumentService에서 사용할 vector_stor
 
 class DocumentService:
     async def process_upload(self, file: UploadFile, index_name: str) -> UploadResponse:
+        """단일 파일 업로드 처리"""
+        return await self._process_single_file(file, index_name)
+        
+    async def process_multiple_uploads(self, files: List[UploadFile], index_name: str) -> MultiUploadResponse:
+        """여러 파일 업로드 처리"""
+        logger.info(f"Processing {len(files)} files for index {index_name}")
+        
+        if index_name not in INDEX_MAP:
+            logger.error(f"Invalid index_name: {index_name}. Must be one of {list(INDEX_MAP.keys())}")
+            raise ValueError(f"잘못된 인덱스 이름입니다: {index_name}")
+        
+        results = []
+        total_chunks = 0
+        
+        for file in files:
+            try:
+                logger.info(f"Processing file: {file.filename}")
+                result = await self._process_single_file(file, index_name)
+                results.append(FileUploadResult(
+                    filename=file.filename,
+                    chunks=result.chunks,
+                    success=True
+                ))
+                total_chunks += result.chunks
+            except Exception as e:
+                logger.error(f"Error processing file {file.filename}: {e}", exc_info=True)
+                results.append(FileUploadResult(
+                    filename=file.filename,
+                    chunks=0,
+                    success=False,
+                    error=str(e)
+                ))
+        
+        return MultiUploadResponse(
+            index=index_name,
+            total_chunks=total_chunks,
+            files=results
+        )
+    
+    async def _process_single_file(self, file: UploadFile, index_name: str) -> UploadResponse:
         logger.info(f"Starting Stage 2: Processing file {file.filename} for index {index_name}")
 
         if index_name not in INDEX_MAP:
