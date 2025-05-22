@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  # ───────── OpenSearch 단일 노드 ─────────
+  opensearch:
+    build:
+      context: ./docker/opensearch
+    image: opensearch-with-nori:latest
+    container_name: opensearch
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch
+      - discovery.type=single-node      # 단일 노드 모드
+      - bootstrap.memory_lock=true
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=FisaTeam!5
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    networks: [opensearch-net]
+
+  # ───────── Dashboards ─────────
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: opensearch-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports: ["5601:5601"]
+    networks: [opensearch-net]
+
+  # ───────── Vector-DB 관리 서버 (FastAPI) ─────────
+  vectordb-server:
+    build:
+      context: .                      # FastAPI Dockerfile
+    container_name: vectordb-server
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file: [.env]
+    volumes:
+      - .:/code                       # 개발용 – 운영 시 제거
+    ports: ["8000:8000"]
+    depends_on:
+      opensearch: { condition: service_healthy }
+    networks: [opensearch-net]
+
+volumes:
+  opensearch-data:
+
+networks:
+  opensearch-net:
