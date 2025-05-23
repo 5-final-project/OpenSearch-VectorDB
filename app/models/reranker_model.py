@@ -26,7 +26,7 @@ def init_reranker():
         )
         
         # CrossEncoderReranker 생성 (원할한 수의 문서 반환을 위해 큰 값 설정)
-        _reranker = CrossEncoderReranker(model=_cross_encoder, top_n=1000)
+        _reranker = CrossEncoderReranker(model=_cross_encoder, top_n=100)
         logger.info("크로스 인코더 모델 초기화 완료")
         
     except Exception as e:
