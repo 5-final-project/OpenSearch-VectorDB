@@ -100,12 +100,15 @@ async def add_documents(index_name: str, docs: List[Document]) -> List[str]:
     added_ids = []
     for doc in docs:
         # 임베딩 계산
-        embeddings = embedding_model.embed_query(doc.page_content)
+        embeddings = embedding_model.embed_documents([doc.page_content])
+        
+        # embed_documents는 중첩 리스트를 반환하므로 첫 번째 항목 추출
+        embedding_vector = embeddings[0] if isinstance(embeddings, list) and len(embeddings) > 0 else embeddings
         
         # OpenSearch 문서 준비
         opensearch_doc = {
             "content": doc.page_content,  # 텍스트 내용은 content 필드에
-            "embedding": embeddings,      # 임베딩 벡터는 embedding 필드에
+            "embedding": embedding_vector,  # 임베딩 벡터는 embedding 필드에
             **doc.metadata                # 메타데이터는 최상위 레벨에 전개
         }
         

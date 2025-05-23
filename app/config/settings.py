@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     master_index: str = os.environ.get("MASTER_INDEX", "master_documents")
     
     # 임베딩 모델
-    embedding_model: str = os.environ.get("EMBEDDING_MODEL", "intfloat/multilingual-e5-large-instruct")
+    embedding_model: str = os.environ.get("EMBEDDING_MODEL", "jinaai/jina-embeddings-v3")
     
     # 리랭킹 모델
     reranker_model: str = os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")

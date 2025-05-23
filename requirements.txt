@@ -11,9 +11,10 @@ langchain-core
 langchain-community
 langchain-docling # Added for DoclingLoader
 sentence-transformers>=2.6.1
-transformers>=4.41.0
-numpy
+transformers torch einops
+numpy<2
 torch>=2.2.0  # transformers 실행에 필요
+einops>=0.6.0
 
 # 문서 파싱/한국어 처리
 # kss # Replaced by kiwipiepy
