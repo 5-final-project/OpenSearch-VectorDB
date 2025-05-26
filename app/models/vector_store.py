@@ -87,8 +87,18 @@ def _get_store_for_index(index_name: str) -> OpenSearchVectorSearch:
 # Public API
 # ──────────────────────────────────────────────────────────────
 
-async def add_documents(index_name: str, docs: List[Document]) -> List[str]:
-    """텍스트+메타데이터를 인덱스에 비동기적으로 추가 (직접 임베딩 계산)."""
+async def add_documents(index_name: str, docs: List[Document]) -> tuple[List[str], List[List[float]]]:
+    """텍스트+메타데이터를 인덱스에 비동기적으로 추가하고 계산된 임베딩도 함께 반환.
+    
+    Parameters
+    ----------
+    index_name : 인덱스 이름
+    docs : 저장할 문서 리스트
+    
+    Returns
+    -------
+    tuple[List[str], List[List[float]]] : (추가된 문서 ID 리스트, 계산된 임베딩 리스트)
+    """
     if _os_client is None:
         raise RuntimeError("OpenSearch client not initialized")
     
@@ -98,43 +108,51 @@ async def add_documents(index_name: str, docs: List[Document]) -> List[str]:
     logger.info(f"Adding {len(docs)} documents to index '{index_name}' using direct OpenSearch API")
     
     added_ids = []
-    for doc in docs:
-        # 임베딩 계산
-        embeddings = embedding_model.embed_documents([doc.page_content])
-        
-        # embed_documents는 중첩 리스트를 반환하므로 첫 번째 항목 추출
-        embedding_vector = embeddings[0] if isinstance(embeddings, list) and len(embeddings) > 0 else embeddings
-        
-        # OpenSearch 문서 준비
-        opensearch_doc = {
-            "content": doc.page_content,  # 텍스트 내용은 content 필드에
-            "embedding": embedding_vector,  # 임베딩 벡터는 embedding 필드에
-            **doc.metadata                # 메타데이터는 최상위 레벨에 전개
-        }
-        
-        # chunk_id를 문서 ID로 사용, 없으면 랜덤 생성
-        doc_id = doc.metadata.get("chunk_id")
-        if not doc_id:
-            doc_id = str(uuid.uuid4())
-            logger.warning(f"No chunk_id found in metadata, generated: {doc_id}")
-        
-        try:
-            # OpenSearch에 문서 저장
-            response = _os_client.index(
-                index=index_name,
-                body=opensearch_doc,
-                id=doc_id,
-                refresh=True  # 즉시 검색 가능하도록
-            )
-            
-            added_ids.append(response["_id"])
-            logger.debug(f"Document with ID {doc_id} added to index {index_name}")
-        except Exception as e:
-            logger.error(f"Error adding document with ID {doc_id} to index {index_name}: {e}", exc_info=True)
-            raise
+    calculated_embeddings = []
     
+    # 문서 콘텐츠 리스트 생성
+    contents = [doc.page_content for doc in docs]
+    
+    # 임베딩 계산 (배치 처리 없이 한번에 처리)
+    embeddings = embedding_model.embed_documents(contents)
+    calculated_embeddings = embeddings
+    
+    # 각 문서와 해당 임베딩 처리
+    for i, doc in enumerate(docs):
+        if i < len(calculated_embeddings):
+            embedding_vector = calculated_embeddings[i]
+            
+            # OpenSearch 문서 준비
+            opensearch_doc = {
+                "content": doc.page_content,  # 텍스트 내용은 content 필드에
+                "embedding": embedding_vector,  # 임베딩 벡터는 embedding 필드에
+                **doc.metadata                # 메타데이터는 최상위 레벨에 전개
+            }
+            
+            # chunk_id를 문서 ID로 사용, 없으면 랜덤 생성
+            doc_id = doc.metadata.get("chunk_id")
+            if not doc_id:
+                doc_id = str(uuid.uuid4())
+                logger.warning(f"No chunk_id found in metadata, generated: {doc_id}")
+            
+            try:
+                # OpenSearch에 문서 저장
+                response = _os_client.index(
+                    index=index_name,
+                    body=opensearch_doc,
+                    id=doc_id,
+                    refresh=True  # 즉시 검색 가능하게 설정
+                )
+                
+                added_ids.append(doc_id)
+                logger.debug(f"Document {doc_id} indexed in {index_name}")
+                
+            except Exception as e:
+                logger.error(f"Error indexing document {doc_id} in {index_name}: {e}", exc_info=True)
+                # 예외 발생 시 계속 진행
+
     logger.info(f"Successfully added {len(added_ids)} documents to index '{index_name}'")
-    return added_ids
+    return added_ids, calculated_embeddings
 
 
 def similarity_search(query_vector, index_name: str, k: int = 10):

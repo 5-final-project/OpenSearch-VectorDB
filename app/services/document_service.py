@@ -1,4 +1,4 @@
-""" PDF 업로드 → 청크 분할 → VectorStore 저장. """
+""" PDF 업로드 → 청크 분할 → 요약 → VectorStore 저장. """
 # import uuid # 이미 불필요
 # from typing import List # 이미 불필요
 
@@ -7,8 +7,10 @@ import logging
 import uuid
 import tempfile
 import os
+import json
+import numpy as np
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable, Tuple
 
 from langchain_docling import DoclingLoader
 from kiwipiepy import Kiwi # Kiwi import 확인
@@ -17,12 +19,16 @@ from app.config.opensearch_config import INDEX_MAP # MASTER_INDEX는 settings에
 from app.models.document_model import UploadResponse, MultiUploadResponse, FileUploadResult
 from app.models import vector_store as vector_store_module # VectorStore 클래스 대신 vector_store 모듈을 임포트
 from app.config.settings import get_settings
+from app.utils.hierarchical_summarizer import summarize_document, call_llm_api
+from app.services.summary_service import SummaryService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 vector_store = vector_store_module # DocumentService에서 사용할 vector_store가 임포트한 모듈을 가리키도록 함
 
 class DocumentService:
+    def __init__(self):
+        self.summary_service = SummaryService()
     async def process_upload(self, file: UploadFile, index_name: str) -> UploadResponse:
         """단일 파일 업로드 처리"""
         return await self._process_single_file(file, index_name)
@@ -72,6 +78,10 @@ class DocumentService:
         
         main_doc_id = str(uuid.uuid4()) # 파일 전체에 대한 고유 ID
         documents_to_store: List[Document] = []
+        
+        # 임베딩을 추출하여 저장할 리스트
+        chunks_for_summary: List[str] = []
+        embeddings_for_summary: List[np.ndarray] = []
 
         temp_file_path = None
         try:
@@ -82,15 +92,76 @@ class DocumentService:
                 temp_file_path = tmp_file.name
             logger.info(f"Uploaded file '{file.filename}' saved temporarily to '{temp_file_path}'.")
 
-            # DoclingLoader를 사용하여 문서 로드
-            loader = DoclingLoader(temp_file_path)
-            loaded_documents_from_docling = loader.load() # List[langchain_core.documents.Document]
-            
-            if not loaded_documents_from_docling:
-                logger.warning(f"No documents were loaded from '{file.filename}' by DoclingLoader.")
-                return UploadResponse(index=index_name, chunks=0)
+            # PDF 파일 전처리 - 유효하지 않은 유니코드 문자 처리
+            try:
+                # 임시 클린 PDF 경로 생성
+                cleaned_temp_path = temp_file_path + ".cleaned.pdf"
+                
+                # 오류가 발생할 가능성이 있는 PDF 파일 복사
+                import shutil
+                shutil.copy2(temp_file_path, cleaned_temp_path)
+                logger.info(f"Created a copy of the PDF for processing: {cleaned_temp_path}")
+                
+                # PDF 타입 확인 및 유효성 검사
+                import subprocess
+                try:
+                    # pdfinfo를 사용하여 PDF 정보 확인 (선택적)
+                    result = subprocess.run(['pdfinfo', cleaned_temp_path], capture_output=True, text=True)
+                    logger.info(f"PDF validation result: {result.stdout[:200]}...")
+                except Exception as pdf_check_e:
+                    logger.warning(f"PDF info check failed: {str(pdf_check_e)}. Continuing anyway.")
+                
+                # DoclingLoader를 사용하여 문서 로드
+                logger.info(f"Loading PDF with DoclingLoader: {file.filename}")
+                # 가장 기본적인 DoclingLoader 사용
+                loader = DoclingLoader(
+                    cleaned_temp_path  # 전처리된 파일 사용
+                    # 추가 매개변수 제거 - 오류 발생
+                )
+                
+                try:
+                    loaded_documents_from_docling = loader.load()
+                except RuntimeError as re:
+                    if "Invalid code point" in str(re):
+                        logger.warning("Invalid code point detected, attempting to fix and reload...")
+                        # PDF 코드포인트 오류 처리
+                        try:
+                            # qpdf를 사용하여 PDF 수정 (선택적)
+                            repair_result = subprocess.run(['qpdf', '--replace-input', cleaned_temp_path], 
+                                                      capture_output=True, text=True)
+                            logger.info(f"PDF repair attempt result: {repair_result.stdout}")
+                            
+                            # 수정된 PDF 다시 로드 - 기본 매개변수만 사용
+                            loader = DoclingLoader(
+                                cleaned_temp_path  # 전처리된 파일만 지정
+                            )
+                            loaded_documents_from_docling = loader.load()
+                        except Exception as repair_e:
+                            logger.error(f"PDF repair failed: {str(repair_e)}")
+                            raise
+                    else:
+                        raise
+                
+                # 임시 클린 PDF 파일 삭제
+                try:
+                    os.remove(cleaned_temp_path)
+                    logger.info(f"Removed temporary cleaned PDF: {cleaned_temp_path}")
+                except Exception as clean_e:
+                    logger.warning(f"Failed to remove temporary cleaned PDF: {str(clean_e)}")
+                
+                if not loaded_documents_from_docling:
+                    logger.warning(f"No documents were loaded from '{file.filename}' by DoclingLoader.")
+                    return UploadResponse(index=index_name, chunks=0, error="PDF에서 문서 내용을 추출할 수 없습니다.")
+                
+                logger.info(f"DoclingLoader loaded {len(loaded_documents_from_docling)} sections from '{file.filename}'.")
+            except Exception as e:
+                logger.error(f"Error loading PDF: {str(e)}", exc_info=True)
+                return UploadResponse(
+                    index=index_name, 
+                    chunks=0, 
+                    error=f"PDF 파일 처리 중 오류가 발생했습니다: {str(e)[:100]}"
+                )
 
-            logger.info(f"DoclingLoader loaded {len(loaded_documents_from_docling)} sections from '{file.filename}'.")
 
             # Kiwi 초기화 (kiwi.space 전처리용)
             try:
@@ -140,6 +211,10 @@ class DocumentService:
                 final_metadata["upload_timestamp"] = current_time  # 업로드 시간 추가
                 final_metadata["source"] = file.filename  # source에도 파일명 사용
 
+                # 요약을 위한 텍스트 저장
+                chunks_for_summary.append(processed_chunk_text)
+                
+                # OpenSearch Document 생성
                 document_for_opensearch = Document(
                     page_content=processed_chunk_text,
                     metadata=final_metadata
@@ -169,8 +244,8 @@ class DocumentService:
         logger.info(f"Adding {len(documents_to_store)} processed chunks from {file.filename} to OpenSearch index '{index_name}'.")
         
         try:
-            # 1. 지정된 인덱스에 문서 추가
-            added_ids_specific_index = await vector_store.add_documents(index_name=index_name, docs=documents_to_store)
+            # 1. 지정된 인덱스에 문서 추가 (임베딩도 함께 반환받음)
+            added_ids_specific_index, embeddings_for_summary = await vector_store.add_documents(index_name=index_name, docs=documents_to_store)
             logger.info(f"Successfully added {len(added_ids_specific_index)} chunks to specific index '{index_name}' for file: {file.filename}. Document ID: {main_doc_id}")
 
             # 2. 지정된 인덱스가 마스터 인덱스와 다르고, documents_to_store가 비어있지 않은 경우 마스터 인덱스에도 추가
@@ -180,6 +255,55 @@ class DocumentService:
                 logger.info(f"Successfully added {len(documents_to_store)} chunks to master index '{settings.master_index}' for file: {file.filename}.")
             
             total_added_count = len(added_ids_specific_index)
+            
+            # 3. 문서 요약 수행
+            if chunks_for_summary:
+                try:
+                    logger.info(f"Starting document summarization for file: {file.filename}")
+                    
+                    # add_documents에서 반환받은 임베딩 사용 (임베딩 재계산 필요 없음)
+                    logger.info(f"Using {len(embeddings_for_summary)} pre-calculated embeddings for summarization")
+                    
+                    # numpy 배열로 변환
+                    embeddings_for_summary = [np.array(emb) for emb in embeddings_for_summary]
+                    
+                    if len(chunks_for_summary) == len(embeddings_for_summary):
+                        # 비동기 요약 함수 생성
+                        async def summarize_fn(text: str) -> str:
+                            return await call_llm_api(text)
+                        
+                        # 계층적 요약 수행 (비동기 호출)
+                        logger.info(f"Running hierarchical summarization for {len(chunks_for_summary)} chunks")
+                        cluster_summaries, final_summary = await summarize_document(
+                            chunks=chunks_for_summary,
+                            embeddings=embeddings_for_summary,
+                            summarize_fn=summarize_fn
+                        )
+                        
+                        # MySQL DB에 요약 정보 저장
+                        save_result = await self.summary_service.save_document_summary(
+                            doc_id=main_doc_id,
+                            filename=file.filename,
+                            collection=index_name,
+                            summary=final_summary,
+                            cluster_summaries=cluster_summaries,
+                            chunk_count=len(chunks_for_summary)
+                        )
+                        
+                        if save_result:
+                            logger.info(f"Successfully saved summary for file: {file.filename}, doc_id: {main_doc_id}")
+                        else:
+                            logger.warning(f"Failed to save summary for file: {file.filename}, doc_id: {main_doc_id}")
+                    else:
+                        logger.warning(
+                            f"Mismatch between chunks_for_summary ({len(chunks_for_summary)}) and "
+                            f"embeddings_for_summary ({len(embeddings_for_summary)}). Skipping summarization."
+                        )
+                except Exception as e:
+                    logger.error(f"Error during document summarization: {str(e)}", exc_info=True)
+                    # 요약 실패는 전체 업로드 실패로 간주하지 않음
+            else:
+                logger.warning(f"No chunks available for summarization for file: {file.filename}")
 
             return UploadResponse(
                 index=index_name, 

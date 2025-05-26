@@ -34,6 +34,13 @@ FROM python:3.11-slim AS final
 
 WORKDIR /code
 
+# PDF 처리 도구 및 필수 유틸리티 설치
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    poppler-utils \
+    qpdf \
+    && rm -rf /var/lib/apt/lists/*
+
 # builder 스테이지에서 생성된 가상 환경 복사
 COPY --from=builder /opt/venv /opt/venv
 

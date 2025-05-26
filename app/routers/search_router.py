@@ -1,7 +1,7 @@
 """벡터 검색 & 하이브리드 검색 라우터."""
 from fastapi import APIRouter, HTTPException
 from app.services.search_service import SearchService
-from app.models.search_model import SearchRequest, SearchResponse
+from app.models.search_model import SearchRequest, SearchResponse, RelatedSearchRequest
 
 router = APIRouter()
 search_service = SearchService()
@@ -53,5 +53,19 @@ async def hybrid_search_reranked(request: SearchRequest):
     """
     try:
         return await search_service.hybrid_search_reranked(request)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search-related", response_model=SearchResponse)
+async def search_related_documents(request: RelatedSearchRequest):
+    """
+특정 문서 ID 목록 내에서만 검색을 수행합니다.
+    
+    이 엔드포인트는 지정된 문서 ID 목록에 속하는 청크들 중에서만 검색을 수행합니다.
+    크로스 인코더 재정렬 하이브리드 검색 방식을 사용하여 정확한 결과를 제공합니다.
+    """
+    try:
+        return await search_service.search_related(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
