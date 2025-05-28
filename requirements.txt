@@ -11,6 +11,7 @@ langchain-core
 langchain-community
 langchain-docling # Added for DoclingLoader
 sentence-transformers>=2.6.1
+langchain_experimental
 transformers
 torch>=2.2.0  # transformers 실행에 필요
 einops>=0.6.0
@@ -39,4 +40,5 @@ pydantic-settings>=2.1.0
 typing_extensions>=4.11.0
 tqdm>=4.66.2
 python-multipart
+boto3
 # dotenv 패키지는 python-dotenv와 중복이므로 제거

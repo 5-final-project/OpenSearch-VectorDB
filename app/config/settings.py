@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     llm_api_url: str = os.environ.get("LLM_API_URL", "https://qwen3.ap.loclx.io/api/generate")
     llm_max_tokens: int = int(os.environ.get("LLM_MAX_TOKENS", 32768))
     
+    # AWS S3 설정
+    aws_access_key: str = os.environ.get("AWS_ACCESS_KEY")
+    aws_secret_key: str = os.environ.get("AWS_SECRET_KEY")
+    bucket_name: str = os.environ.get("BUCKET_NAME")
+    aws_default_region: str = os.environ.get("AWS_DEFAULT_REGION")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

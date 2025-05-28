@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
     
     settings = get_settings()  # .env 로부터 환경 변수 로드
 
-    app = FastAPI(title="Vector DB management Server", version="0.3.0")
+    app = FastAPI(title="Document Management Server", version="0.3.0")
 
     # CORS 설정 (필요 시)
     app.add_middleware(

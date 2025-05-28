@@ -9,6 +9,12 @@ search_service = SearchService()
 
 @router.post("/vector", response_model=SearchResponse)
 async def vector_search(request: SearchRequest):
+    """
+임베딩 벡터를 사용한 의미 기반 검색을 수행합니다.
+    
+    이 엔드포인트는 텍스트 쿼리를 임베딩 벡터로 변환한 후, 코사인 유사도를 기준으로
+    의미적으로 가장 관련성이 높은 문서를 검색합니다. 검색 결과는 유사도 점수로 정렬됩니다.
+    """
     try:
         return await search_service.vector_search(request)
     except Exception as e:
@@ -18,7 +24,8 @@ async def vector_search(request: SearchRequest):
 
 @router.post("/keyword", response_model=SearchResponse)
 async def keyword_search(request: SearchRequest):
-    """순수한 BM25 기반 키워드 검색을 수행합니다.
+    """
+순수한 BM25 기반 키워드 검색을 수행합니다.
     
     이 엔드포인트는 벡터 검색 없이 순수한 텍스트 기반 검색을 수행합니다.
     점수는 0~1 범위로 정규화됩니다.
@@ -29,7 +36,7 @@ async def keyword_search(request: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/hybrid-native", response_model=SearchResponse)
+@router.post("/hybrid", response_model=SearchResponse)
 async def hybrid_search_native(request: SearchRequest):
     """
 OpenSearch 내장 하이브리드 검색을 수행합니다.

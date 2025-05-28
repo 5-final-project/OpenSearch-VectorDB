@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # GMM+BIC로 군집 수 결정
 # ────────────────────────────────
 def _select_k(vecs: np.ndarray,
-              k_min: int = 2,
+              k_min: int = 1,
               k_max: int = 8) -> int:
     n = vecs.shape[0]
     if n <= k_min:
@@ -241,11 +241,11 @@ async def call_llm_api(text: str, max_tokens: int = None) -> str:
             
         logger.info(f"API 설정 - URL: {api_url}, max_tokens: {max_tokens}")
         
-        system_prompt = "당신은 문서 요약 전문가입니다. 주어진 텍스트를 핵심만 간결하게 요약해주세요."
-        user_prompt = f"다음 텍스트를 핵심 내용만 간결하게 요약해주세요:\n\n{text}"
+        system_prompt = "입력된 텍스트를 깔끔하게 요약하세요. 단, 정보의 손실이 없도록 요약하세요."
+        user_prompt = f"다음 텍스트를 요약하세요:\n\n{text}"
         
         logger.info(f"System 프롬프트: {system_prompt}")
-        logger.info(f"User 프롬프트: 다음 텍스트를 핵심 내용만 간결하게 요약해주세요: [Text 생략]")
+        logger.info(f"User 프롬프트: 다음 텍스트를 요약하세요: [Text 생략]")
         
         payload = {
             "prompt": [
@@ -287,45 +287,39 @@ async def call_llm_api(text: str, max_tokens: int = None) -> str:
             if "choices" in result and len(result["choices"]) > 0:
                 logger.info("OpenAI 형식 응답 처리 중...")
                 summary = result["choices"][0]["message"]["content"]
-                
+                '''
                 # <think> 태그 제거 처리
-                if "<think>" in summary:
-                    logger.warning("<think> 태그 발견, 제거 중...")
+                if "</think>" in summary:
+                    logger.warning("</think> 태그 발견, 제거 중...")
                     original_length = len(summary)
-                    # <think>...</think> 사이의 내용 제거
-                    if "</think>" in summary:
-                        think_content = summary.split("<think>")[1].split("</think>")[0]
-                        logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
-                        summary = summary.split("</think>", 1)[1].strip()
-                    else:  # </think> 태그가 없는 경우
-                        summary = summary.replace("<think>", "").strip()
+                    think_content = summary.split("</think>")[0]
+                    logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
+                    summary = summary.split("</think>")[1].strip()
+                    
                     new_length = len(summary)
                     logger.info(f"<think> 태그 제거 완료: {original_length} -> {new_length} 문자")
                 
                 summary_preview = summary[:150] + "..." if len(summary) > 150 else summary
                 logger.info(f"\n최종 요약 결과({len(summary)}문자): {summary_preview}")
                 return summary
-                
+                '''
             elif "response" in result:
                 logger.info("Qwen 형식 응답 처리 중...")
                 content = result["response"]
                 processing_time = result.get("processing_time", "N/A")
                 logger.info(f"API 처리 시간: {processing_time}")
-                
+                '''
                 # <think> 태그 제거 처리
-                if "<think>" in content:
+                if "</think>" in content:
                     logger.warning("<think> 태그 발견, 제거 중...")
                     original_length = len(content)
                     # <think>...</think> 사이의 내용 제거
-                    if "</think>" in content:
-                        think_content = content.split("<think>")[1].split("</think>")[0]
-                        logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
-                        content = content.split("</think>", 1)[1].strip()
-                    else:  # </think> 태그가 없는 경우
-                        content = content.replace("<think>", "").strip()
+                    think_content = content.split("</think>")[0]
+                    logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
+                    content = content.split("</think>")[1].strip()
                     new_length = len(content)
                     logger.info(f"<think> 태그 제거 완료: {original_length} -> {new_length} 문자")
-                
+                '''
                 content_preview = content[:150] + "..." if len(content) > 150 else content
                 logger.info(f"\n최종 요약 결과({len(content)}문자): {content_preview}")
                 return content

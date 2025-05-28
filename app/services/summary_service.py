@@ -6,7 +6,6 @@ from typing import List, Optional, Dict, Any
 from mysql.connector import Error
 
 from app.config.mysql_config import get_db_manager
-from app.models.summary_model import initialize_tables
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +14,7 @@ class SummaryService:
     
     def __init__(self):
         self.db_manager = get_db_manager()
-        # 초기화 시 테이블 생성 확인
-        initialize_tables(self.db_manager)
-    
+            
     async def save_document_summary(self, 
                                    doc_id: str, 
                                    filename: str, 

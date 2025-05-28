@@ -17,6 +17,7 @@ INDEX_MAP: Dict[str, str] = {
     "operation_documents": "operation_documents",
     "it_security_documents": "it_security_documents",
     "organization_documents": "organization_documents",
+    "stt_texts": "stt_texts"
 }
 
 MASTER_INDEX: str = "master_documents"

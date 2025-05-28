@@ -1,7 +1,7 @@
 """OpenSearch VectorStore 초기화 및 헬퍼 모듈 (정리 버전)"""
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import sys
 import uuid
 import logging
@@ -155,10 +155,32 @@ async def add_documents(index_name: str, docs: List[Document]) -> tuple[List[str
     return added_ids, calculated_embeddings
 
 
-def similarity_search(query_vector, index_name: str, k: int = 10):
-    """임베딩 벡터를 사용하여 유사 문서 검색 (OpenSearch kNN 쿼리 직접 사용)"""
+def similarity_search(query_vector, indices: Optional[List[str]] = None, k: int = 10):
+    """임베딩 벡터를 사용하여 유사 문서 검색 (OpenSearch kNN 쿼리 직접 사용)
+    
+    Parameters
+    ----------
+    query_vector : 검색할 벡터
+    indices : 검색할 인덱스 목록, None이거나 비어있으면 마스터 인덱스 사용
+    k : 반환할 결과 수
+    
+    Returns
+    -------
+    List[SearchResult] : 검색 결과 리스트
+    """
     if _os_client is None:
         raise RuntimeError("OpenSearch client not initialized")
+    
+    settings = get_settings()
+    
+    # 인덱스 목록이 비어있으면 마스터 인덱스 사용
+    if not indices:
+        index_name = settings.master_index
+        logger.debug(f"No indices specified, using master index: {index_name}")
+    else:
+        # 여러 인덱스 검색 시 인덱스 이름을 쉼표로 구분하여 지정
+        index_name = ",".join(indices)
+        logger.debug(f"Searching in indices: {index_name}")
     
     # kNN 쿼리 구성 - embedding 필드 사용
     knn_query = {
@@ -199,17 +221,39 @@ def similarity_search(query_vector, index_name: str, k: int = 10):
             )
             results.append(result)
         
-        logger.debug(f"Found {len(results)} similar documents in index '{index_name}'")
+        logger.debug(f"Found {len(results)} similar documents in indices '{index_name}'")
         return results
     except Exception as e:
-        logger.error(f"Error performing similarity search in index '{index_name}': {e}", exc_info=True)
+        logger.error(f"Error performing similarity search in indices '{index_name}': {e}", exc_info=True)
         raise
 
 
-def bm25_search(query: str, index_name: str, k: int = 10):
-    """문서 키워드 검색 (BM25 알고리즘 사용)"""
+def bm25_search(query: str, indices: Optional[List[str]] = None, k: int = 10):
+    """문서 키워드 검색 (BM25 알고리즘 사용)
+    
+    Parameters
+    ----------
+    query : 검색할 텍스트 쿼리
+    indices : 검색할 인덱스 목록, None이거나 비어있으면 마스터 인덱스 사용
+    k : 반환할 결과 수
+    
+    Returns
+    -------
+    List[SearchResult] : 검색 결과 리스트
+    """
     if _os_client is None:
         raise RuntimeError("Vector store not initialized")
+    
+    settings = get_settings()
+    
+    # 인덱스 목록이 비어있으면 마스터 인덱스 사용
+    if not indices:
+        index_name = settings.master_index
+        logger.debug(f"No indices specified, using master index: {index_name}")
+    else:
+        # 여러 인덱스 검색 시 인덱스 이름을 쉼표로 구분하여 지정
+        index_name = ",".join(indices)
+        logger.debug(f"Searching in indices: {index_name}")
     
     # BM25 쿼리 구성
     body = {"size": k, "query": {"match": {"content": query}}}
@@ -239,14 +283,14 @@ def bm25_search(query: str, index_name: str, k: int = 10):
             )
             results.append(result)
         
-        logger.debug(f"Found {len(results)} BM25 matches in index '{index_name}'")
+        logger.debug(f"Found {len(results)} BM25 matches in indices '{index_name}'")
         return results
     except Exception as e:
-        logger.error(f"Error performing BM25 search in index '{index_name}': {e}", exc_info=True)
+        logger.error(f"Error performing BM25 search in indices '{index_name}': {e}", exc_info=True)
         raise
 
 
-def hybrid_search_with_pipeline(query_text: str, query_vector: List[float], index_name: str, pipeline_name: str, k: int = 10):
+def hybrid_search_with_pipeline(query_text: str, query_vector: List[float], indices: Optional[List[str]] = None, pipeline_name: str = "hybrid-search-pipeline", k: int = 10):
     """OpenSearch 내장 하이브리드 검색 수행
     
     OpenSearch의 내장 하이브리드 검색 기능을 사용하여 벡터 검색과 키워드 검색을 동시에 수행합니다.
@@ -255,7 +299,7 @@ def hybrid_search_with_pipeline(query_text: str, query_vector: List[float], inde
     Args:
         query_text: 검색할 텍스트 쿼리
         query_vector: 쿼리의 벡터 임베딩
-        index_name: 검색할 인덱스 이름
+        indices: 검색할 인덱스 목록, None이거나 비어있으면 마스터 인덱스 사용
         pipeline_name: 사용할 검색 파이프라인 이름
         k: 반환할 결과 수
         
@@ -264,6 +308,17 @@ def hybrid_search_with_pipeline(query_text: str, query_vector: List[float], inde
     """
     if _os_client is None:
         raise RuntimeError("OpenSearch client not initialized")
+    
+    settings = get_settings()
+    
+    # 인덱스 목록이 비어있으면 마스터 인덱스 사용
+    if not indices:
+        index_name = settings.master_index
+        logger.debug(f"No indices specified, using master index: {index_name}")
+    else:
+        # 여러 인덱스 검색 시 인덱스 이름을 쉼표로 구분하여 지정
+        index_name = ",".join(indices)
+        logger.debug(f"Searching in indices: {index_name}")
     
     # 하이브리드 쿼리 구성
     hybrid_query = {
@@ -325,7 +380,7 @@ def hybrid_search_with_pipeline(query_text: str, query_vector: List[float], inde
             
             results.append(result)
         
-        logger.debug(f"Found {len(results)} hybrid matches in index '{index_name}'")
+        logger.debug(f"Found {len(results)} hybrid matches in indices '{index_name}'")
         return results
         
     except Exception as e:

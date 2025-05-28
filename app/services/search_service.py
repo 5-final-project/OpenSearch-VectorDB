@@ -11,7 +11,7 @@ from app.models.reranker_model import rerank_results
 class SearchService:
     async def vector_search(self, request: SearchRequest) -> SearchResponse:
         query_vec = embedding_model.embed_query(request.query)
-        results = vector_store.similarity_search(query_vec, index_name=MASTER_INDEX, k=request.top_k)
+        results = vector_store.similarity_search(query_vec, indices=request.indices, k=request.top_k)
         return self._to_response(results)
         
     async def keyword_search(self, request: SearchRequest) -> SearchResponse:
@@ -20,7 +20,7 @@ class SearchService:
         이 메서드는 BM25 알고리즘만을 사용해 검색하며, 점수는 0~1 범위로 정규화됩니다.
         """
         # BM25 검색 수행
-        results = vector_store.bm25_search(request.query, index_name=MASTER_INDEX, k=request.top_k)
+        results = vector_store.bm25_search(request.query, indices=request.indices, k=request.top_k)
         
         # 점수 정규화 - 최대 점수로 나누어 0~1 범위로 조정
         if results:
@@ -36,7 +36,7 @@ class SearchService:
         OpenSearch 내장 하이브리드 검색 기능을 사용하여 벡터와 BM25 검색을 합체합니다.
         OpenSearch 검색 파이프라인을 통해 가중치와 점수 정규화를 수행합니다.
         """
-        print(f"\n\n===== OpenSearch 내장 하이브리드 검색 시작: 쿼리='{request.query}', top_k={request.top_k} =====", flush=True)
+        print(f"\n\n===== OpenSearch 내장 하이브리드 검색 시작: 쿼리='{request.query}', top_k={request.top_k}, 인덱스={request.indices or ['마스터 인덱스']} =====", flush=True)
         
         try:
             # 쿼리 텍스트에서 임베딩 생성
@@ -46,7 +46,7 @@ class SearchService:
             results = vector_store.hybrid_search_with_pipeline(
                 query_text=request.query,
                 query_vector=query_vec,
-                index_name=MASTER_INDEX,
+                indices=request.indices,
                 pipeline_name="hybrid-search-pipeline",
                 k=request.top_k
             )
@@ -74,19 +74,19 @@ class SearchService:
         2. 결과를 크로스 인코더 모델을 통해 재정렬 (BAAI/bge-reranker-v2-m3 모델 사용)
         3. 재정렬된 결과를 반환
         """
-        print(f"\n\n===== 재정렬 하이브리드 검색 시작: 쿼리='{request.query}', top_k={request.top_k} =====", flush=True)
+        print(f"\n\n===== 재정렬 하이브리드 검색 시작: 쿼리='{request.query}', top_k={request.top_k}, 인덱스={request.indices or ['마스터 인덱스']} =====", flush=True)
         
         try:
             # 1. 벡터 검색 수행 (재정렬을 위해 더 많은 후보 가져오기)
             expanded_k = max(request.top_k * 3, 30)  # 재정렬을 위해 더 많은 후보 가져오기
             query_vec = embedding_model.embed_query(request.query)
-            vector_results = vector_store.similarity_search(query_vec, index_name=MASTER_INDEX, k=expanded_k)
+            vector_results = vector_store.similarity_search(query_vec, indices=request.indices, k=expanded_k)
             print(f"\n* 벡터 검색 결과: {len(vector_results)} 개", flush=True)
             for i, doc in enumerate(vector_results[:3]):  # 처음 3개만 출력
                 print(f"  - 벡터[{i}]: ID={doc.metadata.doc_id}, 점수={doc.score:.4f}, 청크={doc.metadata.chunk_index}", flush=True)
             
             # 2. BM25 검색 수행
-            bm25_results = vector_store.bm25_search(request.query, index_name=MASTER_INDEX, k=expanded_k)
+            bm25_results = vector_store.bm25_search(request.query, indices=request.indices, k=expanded_k)
             print(f"\n* BM25 검색 결과: {len(bm25_results)} 개", flush=True)
             for i, doc in enumerate(bm25_results[:3]):  # 처음 3개만 출력
                 print(f"  - BM25[{i}]: ID={doc.metadata.doc_id}, 점수={doc.score:.4f}, 청크={doc.metadata.chunk_index}", flush=True)
@@ -147,12 +147,25 @@ class SearchService:
         3. 결과를 크로스 인코더 모델을 통해 재정렬
         4. 재정렬된 결과를 반환
         """
-        print(f"\n\n===== 관련 문서 검색 시작: 쿼리='{request.query}', top_k={request.top_k}, 문서 ID 수={len(request.doc_ids)} =====", flush=True)
+        print(f"\n\n===== 관련 문서 검색 시작: 쿼리='{request.query}', top_k={request.top_k}, 문서 ID 수={len(request.doc_ids)}, 인덱스={request.indices or ['마스터 인덱스']} =====", flush=True)
         
         try:
             from app.models.vector_store import _os_client
             if _os_client is None:
                 raise RuntimeError("OpenSearch client not initialized")
+            
+            # 인덱스 설정
+            from app.config.settings import get_settings
+            settings = get_settings()
+            
+            # 인덱스 목록이 비어있으면 마스터 인덱스 사용
+            if not request.indices:
+                index_name = settings.master_index
+                print(f"* 인덱스를 지정하지 않았으므로 마스터 인덱스 '{index_name}' 사용", flush=True)
+            else:
+                # 여러 인덱스 검색 시 인덱스 이름을 쉼표로 구분하여 지정
+                index_name = ",".join(request.indices)
+                print(f"* 지정된 인덱스 '{index_name}' 사용", flush=True)
             
             # 1. 문서 ID 필터 생성
             doc_filter = {"terms": {"doc_id": request.doc_ids}}
@@ -182,7 +195,7 @@ class SearchService:
             }
             
             # OpenSearch에 쿼리 요청
-            vector_response = _os_client.search(index=MASTER_INDEX, body=knn_query)
+            vector_response = _os_client.search(index=index_name, body=knn_query)
             
             # 결과를 SearchResult 객체 리스트로 변환
             vector_results = []
@@ -223,7 +236,7 @@ class SearchService:
             }
             
             # OpenSearch에 쿼리 요청
-            bm25_response = _os_client.search(index=MASTER_INDEX, body=bm25_query)
+            bm25_response = _os_client.search(index=index_name, body=bm25_query)
             
             # 결과를 SearchResult 객체 리스트로 변환
             bm25_results = []
