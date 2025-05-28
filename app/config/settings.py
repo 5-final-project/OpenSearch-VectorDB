@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     bucket_name: str = os.environ.get("BUCKET_NAME")
     aws_default_region: str = os.environ.get("AWS_DEFAULT_REGION")
     
+    # Gemini API 설정
+    gemini_api_key: str = os.environ.get("GEMINI_API_KEY")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

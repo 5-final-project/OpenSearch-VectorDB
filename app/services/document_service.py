@@ -21,7 +21,7 @@ from app.config.opensearch_config import INDEX_MAP # MASTER_INDEX는 settings에
 from app.models.document_model import UploadResponse, MultiUploadResponse, FileUploadResult, STTUploadRequest, STTUploadResponse, UploadWithoutS3Response
 from app.models import vector_store as vector_store_module # VectorStore 클래스 대신 vector_store 모듈을 임포트
 from app.config.settings import get_settings
-from app.utils.hierarchical_summarizer import summarize_document, call_llm_api
+from app.utils.hierarchical_summarizer import enhanced_summarize_document, call_llm_api
 from app.services.summary_service import SummaryService
 from app.models.embedding_model import embedding_model
 from app.utils.s3_client import S3Client
@@ -291,7 +291,7 @@ class DocumentService:
                         
                         # 계층적 요약 수행 (비동기 호출)
                         logger.info(f"Running hierarchical summarization for {len(chunks_for_summary)} chunks")
-                        cluster_summaries, final_summary = await summarize_document(
+                        cluster_summaries, final_summary = await enhanced_summarize_document(
                             chunks=chunks_for_summary,
                             embeddings=embeddings_for_summary,
                             summarize_fn=summarize_fn

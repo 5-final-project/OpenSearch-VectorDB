@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 10
-    index_list: List[str] = Field(default=[], description="검색할 인덱스 목록 (비어있을 경우 마스터 인덱스에서 검색)")
+    indices: List[str] = Field(default=[], description="검색할 인덱스 목록 (비어있을 경우 마스터 인덱스에서 검색)")
 
 
 class RelatedSearchRequest(SearchRequest):
