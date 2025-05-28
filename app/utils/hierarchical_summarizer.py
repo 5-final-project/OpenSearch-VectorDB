@@ -96,8 +96,8 @@ async def _recursive_summary(texts: List[str],
                               max_depth)
 
 
-# ────────────────────────────────
-# 공개 API (비동기 처리 추가)
+# ───────────────────────────────────
+# 계층적 요약 파이프라인
 # ────────────────────────────────
 async def summarize_document(
     chunks: List[str],
@@ -105,7 +105,7 @@ async def summarize_document(
     summarize_fn: Callable[[str], str],
     *,
     k_min: int = 2,
-    k_max: int = 8,
+    k_max: int = 20,
     max_depth: int = 4
 ) -> Tuple[List[str], str]:
     """
@@ -116,9 +116,8 @@ async def summarize_document(
     chunks       : 분할된 텍스트 조각 리스트
     embeddings   : 각 조각의 임베딩 (chunks와 길이 같아야 함)
     summarize_fn : 텍스트를 요약해 주는 LLM 함수 (비동기 함수)
-    k_min, k_max : GMM 군집 수 탐색 범위
     max_depth    : 재귀 요약 최대 깊이
-
+    k_max        : GMM 군집 수 최대값
     Returns
     -------
     cluster_summaries : 1차 군집별 요약 리스트
@@ -147,7 +146,12 @@ async def summarize_document(
 
     # 1차 군집화
     logger.info("\n===== 1차 군집화 시작 =====")
-    k = _select_k(vecs, k_min, k_max)
+    k = int(np.sqrt(len(chunks)))  # 입력 Chunks 길이의 제곱근을 k로 설정
+    # k 는 k_min 이상 k_max이하로 제한
+    k = max(k, k_min)
+    k = min(k, k_max)
+    logger.info(f"초기 k 값: {k} (청크 수: {len(chunks)})")
+
     if k == 1:
         logger.info("군집이 1개로 나와서 직접 요약 수행")
         all_text = "\n".join(chunks)
@@ -266,7 +270,7 @@ async def call_llm_api(text: str, max_tokens: int = None) -> str:
         logger.info(f"API 호출 시작 - 파라미터: temperature={payload['temperature']}, top_p={payload['top_p']}")
         start_time = asyncio.get_event_loop().time()
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=3600.0) as client:
             response = await client.post(
                 api_url,
                 json=payload,
@@ -283,50 +287,26 @@ async def call_llm_api(text: str, max_tokens: int = None) -> str:
             result = response.json()
             logger.info(f"API 응답 구조: {list(result.keys())}")
             
-            # 응답 형식에 따라 적절히 파싱
-            if "choices" in result and len(result["choices"]) > 0:
-                logger.info("OpenAI 형식 응답 처리 중...")
-                summary = result["choices"][0]["message"]["content"]
-                '''
-                # <think> 태그 제거 처리
-                if "</think>" in summary:
-                    logger.warning("</think> 태그 발견, 제거 중...")
-                    original_length = len(summary)
-                    think_content = summary.split("</think>")[0]
-                    logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
-                    summary = summary.split("</think>")[1].strip()
-                    
-                    new_length = len(summary)
-                    logger.info(f"<think> 태그 제거 완료: {original_length} -> {new_length} 문자")
-                
-                summary_preview = summary[:150] + "..." if len(summary) > 150 else summary
-                logger.info(f"\n최종 요약 결과({len(summary)}문자): {summary_preview}")
-                return summary
-                '''
-            elif "response" in result:
-                logger.info("Qwen 형식 응답 처리 중...")
-                content = result["response"]
-                processing_time = result.get("processing_time", "N/A")
-                logger.info(f"API 처리 시간: {processing_time}")
-                '''
-                # <think> 태그 제거 처리
-                if "</think>" in content:
-                    logger.warning("<think> 태그 발견, 제거 중...")
-                    original_length = len(content)
-                    # <think>...</think> 사이의 내용 제거
-                    think_content = content.split("</think>")[0]
-                    logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
-                    content = content.split("</think>")[1].strip()
-                    new_length = len(content)
-                    logger.info(f"<think> 태그 제거 완료: {original_length} -> {new_length} 문자")
-                '''
-                content_preview = content[:150] + "..." if len(content) > 150 else content
-                logger.info(f"\n최종 요약 결과({len(content)}문자): {content_preview}")
-                return content
-                
-            else:
-                logger.error(f"LLM API 응답 형식 오류: {result}")
-                return "요약 생성 실패: 응답 형식 오류"
+            # 응답 형식에 따라 파싱    
+            logger.info("Qwen 형식 응답 처리 중...")
+            content = result["response"]
+            processing_time = result.get("processing_time", "N/A")
+            logger.info(f"API 처리 시간: {processing_time}")
+            
+            # <think> 태그 제거 처리
+            if "</think>" in content:
+                logger.warning("<think> 태그 발견, 제거 중...")
+                original_length = len(content)
+                # <think>...</think> 사이의 내용 제거
+                think_content = content.split("</think>")[0]
+                logger.info(f"\n제거된 생각 과정: {think_content[:150]}...")
+                content = content.split("</think>")[1].strip()
+                new_length = len(content)
+                logger.info(f"<think> 태그 제거 완료: {original_length} -> {new_length} 문자")
+            
+            content_preview = content[:150] + "..." if len(content) > 150 else content
+            logger.info(f"\n최종 요약 결과({len(content)}문자): {content_preview}")
+            return content
                 
     except Exception as e:
         logger.exception(f"LLM API 호출 중 오류 발생: {str(e)}")

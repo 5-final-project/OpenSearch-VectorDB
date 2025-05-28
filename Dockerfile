@@ -53,4 +53,4 @@ ENV PATH="/opt/venv/bin:$PATH"
 # uvicorn 실행 시 --reload 옵션은 개발 환경에서는 유용하지만,
 # 프로덕션 이미지에서는 제거하는 것이 일반적입니다. 필요에 따라 유지 또는 제거하세요.
 # 여기서는 기존 CMD에 --reload가 없었으므로 그대로 유지합니다.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8156", "--reload"]

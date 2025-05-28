@@ -45,11 +45,11 @@ services:
       context: .                      # FastAPI Dockerfile
     container_name: vectordb-server
     command: >
-      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      uvicorn app.main:app --host 0.0.0.0 --port 8156 --reload
     env_file: [.env]
     volumes:
       - .:/code                       # 개발용 – 운영 시 제거
-    ports: ["8000:8000"]
+    ports: ["8156:8156"]
     depends_on:
       opensearch: { condition: service_healthy }
     networks: [opensearch-net]
